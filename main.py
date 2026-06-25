@@ -18,7 +18,7 @@ def run_web_server():
     app.run(host='0.0.0.0', port=port)
 
 # 2. Main Telegram Bot Logic (PASTE YOUR SECOND BOT'S TOKEN HERE)
-BOT_TOKEN = "PASTE_YOUR_SECOND_BOT_TOKEN_HERE"
+BOT_TOKEN = "8906997992:AAFJUOKr-_hFb5ko1AjZgmvEIh0H75QNgTI"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # Global trackers
