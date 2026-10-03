@@ -1,8 +1,10 @@
 import time
 import re
 import requests
-from collections import defaultdict
 import os
+from collections import defaultdict
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 
 # ==================== CONFIG ====================
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN_HERE"
@@ -11,7 +13,6 @@ LANGUAGE = "Hindi Dub"
 # ================================================
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
 current_episode = 1
 qualities = ["480p [SD]", "720p [HD]", "1080p [FHD]", "2160p [4K]"]
 episode_videos = defaultdict(list)
@@ -19,9 +20,7 @@ last_update_id = 0
 
 def send_message(chat_id, text):
     try:
-        requests.post(f"{API_URL}/sendMessage", json={
-            "chat_id": chat_id, "text": text, "parse_mode": "Markdown"
-        }, timeout=5)
+        requests.post(f"{API_URL}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}, timeout=5)
     except:
         pass
 
@@ -120,14 +119,13 @@ def handle_command(chat_id, text):
         episode_videos.clear()
         send_message(chat_id, "✅ Cleared")
 
-def main():
+def bot_loop():
     global last_update_id
-    print("Bot started on cloud...")
+    print("Bot loop started...")
     while True:
         try:
             r = requests.get(f"{API_URL}/getUpdates", params={
-                "offset": last_update_id + 1,
-                "timeout": 20
+                "offset": last_update_id + 1, "timeout": 20
             }, timeout=25)
             data = r.json()
             if not data.get("ok"):
@@ -157,5 +155,24 @@ def main():
             print("Error:", e)
             time.sleep(3)
 
+# Dummy HTTP server so Render detects a port
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+    def log_message(self, format, *args):
+        pass
+
+def start_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    print(f"Health server running on port {port}")
+    server.serve_forever()
+
 if __name__ == "__main__":
-    main()
+    # Start health server in background
+    Thread(target=start_server, daemon=True).start()
+    # Start the bot
+    bot_loop()
