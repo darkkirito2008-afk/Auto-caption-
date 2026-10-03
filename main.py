@@ -1,146 +1,161 @@
-import os
-import telebot
+import time
 import re
-import sys
-from threading import Thread
-from flask import Flask
+import requests
+from collections import defaultdict
+import os
 
-# 1. Dummy web server for Render's port scanner
-app = Flask('')
+# ==================== CONFIG ====================
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN_HERE"
+CHANNELS = ["@NEW_ANIME_HINDI_DUB_OFFICIALL"]
+LANGUAGE = "Hindi Dub"
+# ================================================
 
-@app.route('/')
-def home():
-    return "Second Bot is alive and running!"
+API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-def run_web_server():
-    # Force dynamic port binding for Render's requirements
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+current_episode = 1
+qualities = ["480p [SD]", "720p [HD]", "1080p [FHD]", "2160p [4K]"]
+episode_videos = defaultdict(list)
+last_update_id = 0
 
-# 2. Main Telegram Bot Logic (PASTE YOUR SECOND BOT'S TOKEN HERE)
-BOT_TOKEN = "8906997992:AAFJUOKr-_hFb5ko1AjZgmvEIh0H75QNgTI"
-bot = telebot.TeleBot(BOT_TOKEN)
-
-# Global trackers
-video_counter = 0  # Total videos processed overall
-ep = 1             # Episode tracker
-manual_quality = None
-
-@bot.message_handler(content_types=['video', 'document'], func=lambda message: True)
-def handle_incoming_media(message):
-    global video_counter, ep, manual_quality
-    
-    media = message.video or message.document
-    if not media:
-        return
-
-    # Calculate exact quality loop stage across 4 versions (remainder of division by 4)
-    if manual_quality:
-        quality = manual_quality
-    else:
-        remainder = video_counter % 4
-        if remainder == 0:
-            quality = "480p [SD]"
-        elif remainder == 1:
-            quality = "720p [HD]"
-        elif remainder == 2:
-            quality = "1080p [FHD]"
-        else:
-            quality = "2160p [4K]"
-
-    caption_text = (
-        f"Episode :- {ep}\n"
-        f"🗣 Language :- Hindi Dub\n"
-        f"🟡 Quality :- {quality}\n"
-        f"@NEW_HINDI_ANIME_OFFICIAL_DUB"
-    )
-
+def send_message(chat_id, text):
     try:
-        # Deliver the copied file with HTML format intact
-        bot.copy_message(
-            chat_id=message.chat.id,
-            from_chat_id=message.chat.id,
-            message_id=message.message_id,
-            caption=caption_text,
-            parse_mode="HTML"
-        )
-        
-        # Safe structural state updates
-        if not manual_quality:
-            video_counter += 1
-            # Every 4 videos completed means one full episode set is done
-            if video_counter % 4 == 0:
-                ep += 1
-        else:
-            ep += 1
-            
-    except Exception as e:
-        print(f"Error handling media: {e}")
+        requests.post(f"{API_URL}/sendMessage", json={
+            "chat_id": chat_id, "text": text, "parse_mode": "Markdown"
+        }, timeout=5)
+    except:
+        pass
 
-@bot.message_handler(commands=['start'])
-def command_start(message):
-    if manual_quality:
-        q = f"{manual_quality} (MANUAL LOCK)"
-    else:
-        remainder = video_counter % 4
-        if remainder == 0:
-            q = "480p [SD]"
-        elif remainder == 1:
-            q = "720p [HD]"
-        elif remainder == 2:
-            q = "1080p [FHD]"
-        else:
-            q = "2160p [4K]"
-    
-    status = f"👋 <b>Bot Status:</b>\n\n🔢 Next Episode: <code>Episode {ep}</code>\n🟡 Next Quality: <code>{q}</code>"
-    bot.reply_to(message, status, parse_mode="HTML")
+def make_caption(ep, quality):
+    return f"""Episode :- {ep}
+🗣 Language :- {LANGUAGE}
+🟡 Quality :- {quality}
+{CHANNELS[0]}"""
 
-@bot.message_handler(commands=['setep'])
-def command_setep(message):
-    global ep
-    match = re.search(r'\d+', message.text)
-    if match:
-        ep = int(match.group())
-        bot.reply_to(message, f"✅ Next episode target set manually to: Episode {ep}")
-    else:
-        bot.reply_to(message, "❌ Use format: /setep 15")
+def detect_episode(text):
+    if not text:
+        return None
+    text = re.sub(r'(2160|1080|720|480)\s*p?', ' ', text.lower())
+    for p in [r'(?:ep|episode|e)\s*[.\-_ ]*(\d{1,3})', r's\d{1,2}e(\d{1,3})', r'[\[\(](\d{1,3})[\]\)]', r'\b(\d{1,3})\b']:
+        m = re.search(p, text)
+        if m:
+            num = int(m.group(1))
+            if num not in [480, 720, 1080, 2160]:
+                return num
+    return None
 
-@bot.message_handler(commands=['setquality'])
-def command_setquality(message):
-    global manual_quality, video_counter
-    text = message.text.lower()
-    
-    if "480" in text:
-        manual_quality = "480p [SD]"
-        bot.reply_to(message, "✅ Quality locked to: <b>480p [SD]</b>", parse_mode="HTML")
-    elif "720" in text:
-        manual_quality = "720p [HD]"
-        bot.reply_to(message, "✅ Quality locked to: <b>720p [HD]</b>", parse_mode="HTML")
-    elif "1080" in text:
-        manual_quality = "1080p [FHD]"
-        bot.reply_to(message, "✅ Quality locked to: <b>1080p [FHD]</b>", parse_mode="HTML")
-    elif "2160" in text or "4k" in text:
-        manual_quality = "2160p [4K]"
-        bot.reply_to(message, "✅ Quality locked to: <b>2160p [4K]</b>", parse_mode="HTML")
-    elif "auto" in text or "reset" in text:
-        manual_quality = None
-        video_counter = 0
-        bot.reply_to(message, "🔄 Restored to automatic <b>Auto-Rotation Mode</b> starting at 480p.", parse_mode="HTML")
-    else:
-        bot.reply_to(message, "❌ Provide a quality level!\nExamples: <code>/setquality 4k</code> or <code>/setquality auto</code>", parse_mode="HTML")
+def is_forwarded(msg):
+    return any(k in msg for k in ["forward_from", "forward_from_chat", "forward_origin", "forward_sender_name"])
 
-@bot.message_handler(commands=['restart'])
-def command_restart(message):
-    global ep, video_counter, manual_quality
-    ep = 1
-    video_counter = 0
-    manual_quality = None
-    bot.reply_to(message, "🔄 Bot system memory fully reset to Episode 1 & 480p [SD]!")
+def edit_caption(chat_id, msg_id, caption):
+    try:
+        r = requests.post(f"{API_URL}/editMessageCaption", json={
+            "chat_id": chat_id, "message_id": msg_id, "caption": caption
+        }, timeout=6)
+        return r.status_code == 200
+    except:
+        return False
+
+def post_video(file_id, caption, chat_id=None):
+    targets = [chat_id] if chat_id else CHANNELS
+    for ch in targets:
+        try:
+            requests.post(f"{API_URL}/sendVideo", json={
+                "chat_id": ch, "video": file_id, "caption": caption
+            }, timeout=30)
+        except:
+            pass
+
+def assign_and_update(ep):
+    videos = episode_videos[ep]
+    if not videos:
+        return
+    sorted_vids = sorted(videos, key=lambda x: x["size"])
+    for i, v in enumerate(sorted_vids):
+        quality = qualities[min(i, 3)]
+        caption = make_caption(ep, quality)
+        if v.get("msg_id") and v.get("is_channel"):
+            edit_caption(v["chat_id"], v["msg_id"], caption)
+
+def process_video(file_id, filename, caption_text, file_size, chat_id, msg_id=None, is_channel=False, forwarded=False):
+    global current_episode
+    ep = detect_episode(f"{filename or ''} {caption_text or ''}") or current_episode
+    current_episode = ep
+
+    episode_videos[ep].append({
+        "size": file_size or 0,
+        "file_id": file_id,
+        "chat_id": chat_id,
+        "msg_id": msg_id,
+        "is_channel": is_channel
+    })
+    if len(episode_videos[ep]) > 4:
+        episode_videos[ep] = episode_videos[ep][-4:]
+
+    assign_and_update(ep)
+
+    if not is_channel:
+        sorted_vids = sorted(episode_videos[ep], key=lambda x: x["size"])
+        rank = next((i for i, v in enumerate(sorted_vids) if v["file_id"] == file_id), 0)
+        quality = qualities[min(rank, 3)]
+        send_message(chat_id, f"🚀 Ep {ep} | {quality}")
+        post_video(file_id, make_caption(ep, quality))
+
+def handle_command(chat_id, text):
+    global current_episode, episode_videos
+    if text.startswith(("/start", "/help")):
+        send_message(chat_id, f"🎬 *Fast Rank Bot*\nCurrent Ep: `{current_episode}`\n\n/status /set 5 /reset /clear")
+    elif text.startswith("/status"):
+        send_message(chat_id, f"Ep `{current_episode}`")
+    elif text.startswith("/set"):
+        try:
+            current_episode = int(text.split()[1])
+            send_message(chat_id, f"✅ Ep {current_episode}")
+        except:
+            send_message(chat_id, "Usage: /set 5")
+    elif text.startswith("/reset"):
+        current_episode = 1
+        episode_videos.clear()
+        send_message(chat_id, "✅ Reset")
+    elif text.startswith("/clear"):
+        episode_videos.clear()
+        send_message(chat_id, "✅ Cleared")
+
+def main():
+    global last_update_id
+    print("Bot started on cloud...")
+    while True:
+        try:
+            r = requests.get(f"{API_URL}/getUpdates", params={
+                "offset": last_update_id + 1,
+                "timeout": 20
+            }, timeout=25)
+            data = r.json()
+            if not data.get("ok"):
+                time.sleep(2)
+                continue
+
+            for u in data["result"]:
+                last_update_id = u["update_id"]
+
+                msg = u.get("message")
+                if msg:
+                    cid = msg["chat"]["id"]
+                    if "video" in msg:
+                        v = msg["video"]
+                        process_video(v["file_id"], v.get("file_name"), msg.get("caption"),
+                                      v.get("file_size", 0), cid, forwarded=is_forwarded(msg))
+                    elif msg.get("text", "").startswith("/"):
+                        handle_command(cid, msg["text"])
+
+                cp = u.get("channel_post")
+                if cp and "video" in cp:
+                    v = cp["video"]
+                    process_video(v["file_id"], v.get("file_name"), cp.get("caption"),
+                                  v.get("file_size", 0), cp["chat"]["id"], cp["message_id"],
+                                  is_channel=True, forwarded=is_forwarded(cp))
+        except Exception as e:
+            print("Error:", e)
+            time.sleep(3)
 
 if __name__ == "__main__":
-    server_thread = Thread(target=run_web_server)
-    server_thread.daemon = True
-    server_thread.start()
-    
-    print("🚀 SECOND CAPTION BOT ENGINE ACTIVE & WEB PORT OPEN...")
-    bot.infinity_polling()
+    main()
